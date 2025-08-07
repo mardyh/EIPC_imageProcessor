@@ -40,19 +40,12 @@ def get_model_path():
     return os.path.join(base_path, "u2net.onnx")
 
 # Generate masks using rembg
-def generate_masks(folder_path):
+def generate_masks(folder_path, image_files):
+    global current_progress
     model_path = get_model_path()
     print(f"Using model path: {model_path}")
     session = new_session(model_name="u2net", model_path=model_path)
     folder = Path(folder_path)
-    image_files = [
-        f for f in folder.rglob('*.*')
-        if f.is_file() and f.suffix.lower() in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.psd']
-    ]
-    total_files = len(image_files)
-    processed_files = 0
-
-    progress_bar["maximum"] = total_files
 
     for file in image_files:
         if file.is_file() and is_image(file):
@@ -65,26 +58,24 @@ def generate_masks(folder_path):
                     input_data = i.read()
                     mask_data = remove(input_data, session=session, only_mask=True)
 
-                # Convert mask to 1-bit image
                 mask_image = Image.open(io.BytesIO(mask_data)).convert('L')
                 mask_image = mask_image.point(lambda p: p > 128 and 255)
                 mask_image = mask_image.convert('1')
 
-                # Save the 1-bit image
                 mask_image.save(output_path, format='PNG')
                 print(f"Mask saved to: {output_path}")
             except Exception as e:
                 print(f"Error processing {file}: {e}")
 
-        processed_files += 1
-        progress_bar["value"] = processed_files
+        current_progress += 1
+        progress_bar["value"] = current_progress
         root.update_idletasks()
 
-    # Automatically run bake if checkbox is checked
     if bake_postshot.get():
-        bake_masks_to_alpha(folder_path)
+        bake_masks_to_alpha(folder_path, image_files)
     else:
         messagebox.showinfo("EIPC Mask Generator", "Mask generation complete!")
+
 
 
 # Bake image + mask into transparent PNG
@@ -133,13 +124,24 @@ def choose_folder_generate():
         progress_label["text"] = f"Selected: {selected_generate_folder}"
 
 def compute_masks():
+    global total_steps, current_progress
     if selected_generate_folder:
+        folder = Path(selected_generate_folder)
+        image_files = [
+            f for f in folder.rglob('*.*')
+            if f.is_file() and f.suffix.lower() in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.psd']
+        ]
+        count = len(image_files)
+        total_steps = count + (count if bake_postshot.get() else 0)
+        current_progress = 0
         progress_bar["value"] = 0
+        progress_bar["maximum"] = total_steps
         progress_label["text"] = "Processing..."
-        generate_masks(selected_generate_folder)
+        generate_masks(selected_generate_folder, image_files)
         progress_label["text"] = "Completed!"
     else:
         messagebox.showwarning("No folder selected", "Please choose a folder first.")
+
 
 # Choose folder for baking only (no mask generation)
 def choose_folder_bake_only():
@@ -147,12 +149,6 @@ def choose_folder_bake_only():
     selected_combine_folder = filedialog.askdirectory()
     if selected_combine_folder:
         progress_label["text"] = f"Selected: {selected_combine_folder}"
-    
-    if folder_path:
-        progress_bar["value"] = 0
-        progress_label["text"] = "Processing..."
-        bake_masks_to_alpha(folder_path)
-        progress_label["text"] = "Completed!"
 
 def compute_bake_only():
     global total_steps, current_progress
@@ -160,8 +156,12 @@ def compute_bake_only():
         folder = Path(selected_combine_folder)
         image_files = [
             f for f in folder.iterdir()
-            if f.is_file() and f.suffix.lower() in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.psd']
-        ]
+            if (
+                f.is_file() and
+                f.suffix.lower() in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.psd'] and
+                not f.name.endswith(".mask.png")
+            )
+]
         total_steps = len(image_files)
         current_progress = 0
         progress_bar["value"] = 0
@@ -223,7 +223,7 @@ Button(tab_generate, text="Compute Masks", command=compute_masks).pack(pady=10)
 Label(tab_combine, text="Select folder of images + masks:").pack(pady=10)
 Button(tab_combine, text="Choose Image Folder", command=choose_folder_bake_only).pack(pady=5)
 
-Button(tab_combine, text="Combine Masks into Alpha", command=compute_bake_only).pack(pady=5)
+Button(tab_combine, text="Combine Masks Into Alpha", command=compute_bake_only).pack(pady=5)
 
 # Shared Progress UI
 progress_label = Label(root, text="")
