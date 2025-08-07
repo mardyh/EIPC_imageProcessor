@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from tkinter import Tk, Button, Label, Checkbutton, IntVar, filedialog, messagebox, ttk, Frame
 from rembg import remove, new_session
-from PIL import Image
+from PIL import Image, ImageOps
 import io
 
 
@@ -79,6 +79,8 @@ def generate_masks(folder_path):
     # Automatically run bake if checkbox is checked
     if bake_postshot.get():
         bake_masks_to_alpha(folder_path)
+    else:
+        messagebox.showinfo("EIPC Mask Generator", "Mask generation complete!")
 
 # Bake image + mask into transparent PNG
 def bake_masks_to_alpha(folder_path):
@@ -100,7 +102,9 @@ def bake_masks_to_alpha(folder_path):
             continue
 
         try:
-            img = Image.open(image_path).convert("RGBA")
+            img = Image.open(image_path)
+            img = ImageOps.exif_transpose(img).convert("RGBA")
+            
             mask = Image.open(mask_path).convert("L")
 
             if mask.size != img.size:
