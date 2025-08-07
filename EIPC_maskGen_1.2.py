@@ -12,6 +12,9 @@ custom_model_path = None  # Will store user-selected model path if applicable
 selected_generate_folder = None
 selected_combine_folder = None
 
+total_steps = 0
+current_progress = 0
+
 
 #--------------FUNCTIONS-----------------#
 
@@ -42,7 +45,10 @@ def generate_masks(folder_path):
     print(f"Using model path: {model_path}")
     session = new_session(model_name="u2net", model_path=model_path)
     folder = Path(folder_path)
-    image_files = list(folder.rglob('*.*'))
+    image_files = [
+        f for f in folder.rglob('*.*')
+        if f.is_file() and f.suffix.lower() in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.psd']
+    ]
     total_files = len(image_files)
     processed_files = 0
 
@@ -74,26 +80,20 @@ def generate_masks(folder_path):
         progress_bar["value"] = processed_files
         root.update_idletasks()
 
-    messagebox.showinfo("EIPC Mask Generator", "Mask generation complete!")
-
     # Automatically run bake if checkbox is checked
     if bake_postshot.get():
         bake_masks_to_alpha(folder_path)
     else:
         messagebox.showinfo("EIPC Mask Generator", "Mask generation complete!")
 
+
 # Bake image + mask into transparent PNG
-def bake_masks_to_alpha(folder_path):
+def bake_masks_to_alpha(folder_path, image_files):
+    global current_progress
     folder = Path(folder_path)
     parent = folder.parent
     postshot_folder = parent / f"{folder.name}_Postshot"
     postshot_folder.mkdir(exist_ok=True)
-
-    image_files = [f for f in folder.iterdir() if f.is_file() and is_image(f)]
-    total_files = len(image_files)
-    processed_files = 0
-
-    progress_bar["maximum"] = total_files
 
     for image_path in image_files:
         mask_path = image_path.with_name(image_path.name + ".mask.png")
@@ -104,26 +104,26 @@ def bake_masks_to_alpha(folder_path):
         try:
             img = Image.open(image_path)
             img = ImageOps.exif_transpose(img).convert("RGBA")
-            
+
             mask = Image.open(mask_path).convert("L")
 
             if mask.size != img.size:
-                mask = mask.resize(img.size, Image.BILINEAR)
+                mask = mask.resize(img.size, Image.Resampling.NEAREST)
 
-            r, g, b, _ = img.split()
-            result = Image.merge("RGBA", (r, g, b, mask))
+            img.putalpha(mask)
+            out_path = postshot_folder / (image_path.stem + ".png")
+            img.save(out_path, format="PNG", optimize=True)
 
-            out_path = postshot_folder / image_path.name
-            result.save(out_path, format="PNG")
             print(f"Baked: {out_path}")
         except Exception as e:
             print(f"Error processing {image_path}: {e}")
 
-        processed_files += 1
-        progress_bar["value"] = processed_files
+        current_progress += 1
+        progress_bar["value"] = current_progress
         root.update_idletasks()
 
     messagebox.showinfo("EIPC Mask Generator", f"Baked images saved to: {postshot_folder}")
+
 
 # Choose folder for generating masks
 def choose_folder_generate():
@@ -155,13 +155,23 @@ def choose_folder_bake_only():
         progress_label["text"] = "Completed!"
 
 def compute_bake_only():
+    global total_steps, current_progress
     if selected_combine_folder:
+        folder = Path(selected_combine_folder)
+        image_files = [
+            f for f in folder.iterdir()
+            if f.is_file() and f.suffix.lower() in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.psd']
+        ]
+        total_steps = len(image_files)
+        current_progress = 0
         progress_bar["value"] = 0
+        progress_bar["maximum"] = total_steps
         progress_label["text"] = "Processing..."
-        bake_masks_to_alpha(selected_combine_folder)
+        bake_masks_to_alpha(selected_combine_folder, image_files)
         progress_label["text"] = "Completed!"
     else:
         messagebox.showwarning("No folder selected", "Please choose a folder first.")
+
 
 
 # Toggle model selector
