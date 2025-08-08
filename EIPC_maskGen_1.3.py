@@ -153,7 +153,11 @@ def bake_masks_to_alpha(folder_path, image_files, show_popup=True):
             if img.shape[:2] != mask.shape[:2]:
                 mask = cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
 
+            # Black out background in RGB
+            img[:, :, 0:3][mask == 0] = 0
+            # Apply mask as alpha channel
             img[:, :, 3] = mask
+            
             out_path = postshot_folder / (image_path.stem + ".png")
             cv2.imwrite(str(out_path), img)
             print(f"Baked: {out_path}")
